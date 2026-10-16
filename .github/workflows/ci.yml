@@ -27,7 +27,10 @@ jobs:
       - name: Run Ruff
         run: ruff check .
 
+      - name: Verify CLI entry point
+        run: logforge --help
+
       - name: Run tests with coverage
         run: |
           coverage run -m unittest discover -s tests -v
-          coverage report
+          coverage report --fail-under=95
