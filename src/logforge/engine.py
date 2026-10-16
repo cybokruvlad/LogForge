@@ -16,6 +16,7 @@ LOG_PATTERN = re.compile(
 )
 
 SUPPORTED_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+MAX_LINE_LENGTH = 1_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,8 +75,44 @@ def parse_line(line: str, line_number: int) -> LogEvent | None:
 
 def iter_log_events(path: Path) -> Iterator[tuple[int, LogEvent | None]]:
     with path.open("r", encoding="utf-8-sig", errors="replace") as file:
-        for line_number, line in enumerate(file, start=1):
-            yield line_number, parse_line(line, line_number)
+        line_number = 0
+        buffer: list[str] = []
+        oversized = False
+
+        def finish_line() -> tuple[int, LogEvent | None]:
+            nonlocal line_number, buffer, oversized
+            line_number += 1
+
+            if oversized:
+                event = None
+            else:
+                line = "".join(buffer)
+                if len(line.rstrip("\r")) > MAX_LINE_LENGTH:
+                    event = None
+                else:
+                    event = parse_line(line, line_number)
+
+            buffer = []
+            oversized = False
+            return line_number, event
+
+        while True:
+            chunk = file.read(65536)
+            if not chunk:
+                break
+
+            for char in chunk:
+                if char == "\n":
+                    yield finish_line()
+                elif not oversized:
+                    if len(buffer) < MAX_LINE_LENGTH + 1:
+                        buffer.append(char)
+                    else:
+                        buffer = []
+                        oversized = True
+
+        if buffer or oversized:
+            yield finish_line()
 
 
 def analyze_file(
